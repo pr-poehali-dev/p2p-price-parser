@@ -46,11 +46,12 @@ export default function Analytics() {
 
   const statCards = TOP_ASSETS.map(sym => {
     const asset = ASSETS.find(a => a.symbol === sym + '/USDT');
-    const h = generatePriceHistory(asset?.price || 100, 30).map(d => d.price);
+    const price = asset?.price ?? 100;
+    const h = generatePriceHistory(price, 30).map(d => d.price);
     return {
       symbol: sym,
-      price: asset?.price || 0,
-      change30d: asset ? ((asset.price - h[0]) / h[0]) * 100 : 0,
+      price,
+      change30d: ((price - h[0]) / h[0]) * 100,
       max: Math.max(...h),
       min: Math.min(...h),
     };
