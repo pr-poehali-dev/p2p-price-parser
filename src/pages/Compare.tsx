@@ -1,184 +1,201 @@
-import { useState } from 'react';
-import { COMPARISON_DATA, EXCHANGES, formatPrice } from '@/data/mockData';
+import { useState, useMemo } from 'react';
+import { COMPARISON_DATA, formatPrice } from '@/data/mockData';
 import Icon from '@/components/ui/icon';
 
-const ACTIVE_EXCHANGES = EXCHANGES.filter(e => e.status !== 'offline');
+const EXCHANGE_NAMES: Record<string, string> = {
+  binance: 'Binance',
+  bybit: 'Bybit',
+  okx: 'OKX',
+  kraken: 'Kraken',
+  coinbase: 'Coinbase',
+};
+
+const EXCHANGE_STATUS: Record<string, string> = {
+  binance: 'online',
+  bybit: 'online',
+  okx: 'online',
+  kraken: 'warning',
+  coinbase: 'online',
+};
 
 export default function Compare() {
-  const [selectedAsset, setSelectedAsset] = useState(COMPARISON_DATA[0]);
+  const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT');
 
-  const prices = Object.values(selectedAsset.prices);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const spread = ((maxPrice - minPrice) / minPrice * 100).toFixed(4);
-  const bestBuy = Object.entries(selectedAsset.prices).reduce((a, b) => a[1] < b[1] ? a : b);
-  const bestSell = Object.entries(selectedAsset.prices).reduce((a, b) => a[1] > b[1] ? a : b);
+  const symbolOptions = COMPARISON_DATA.map(d => d.symbol);
+
+  const rows = useMemo(() => {
+    const data = COMPARISON_DATA.find(d => d.symbol === selectedSymbol);
+    if (!data) return [];
+    const entries = Object.entries(data.prices).map(([ex, price]) => ({ ex, price }));
+    const prices = entries.map(e => e.price);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    return entries.map(e => ({
+      ...e,
+      spread: e.price - minPrice,
+      spreadPct: ((e.price - minPrice) / minPrice) * 100,
+      isMin: e.price === minPrice,
+      isMax: e.price === maxPrice,
+    })).sort((a, b) => a.price - b.price);
+  }, [selectedSymbol]);
+
+  const stats = useMemo(() => {
+    if (!rows.length) return { min: 0, max: 0, avg: 0, totalSpread: 0 };
+    const prices = rows.map(r => r.price);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const avg = prices.reduce((s, p) => s + p, 0) / prices.length;
+    return { min, max, avg, totalSpread: max - min, totalSpreadPct: ((max - min) / min) * 100 };
+  }, [rows]);
+
+  const bestBuy = rows[0];
+  const bestSell = rows[rows.length - 1];
+  const arbitrageProfit = bestBuy && bestSell
+    ? ((bestSell.price - bestBuy.price) / bestBuy.price) * 10000
+    : 0;
 
   return (
     <div className="p-6 space-y-5 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-sm font-medium mb-1">Сравнение цен в реальном времени</h2>
-          <p className="text-xs text-muted-foreground">Найдите лучшую цену для покупки и продажи</p>
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          {symbolOptions.map(sym => (
+            <button
+              key={sym}
+              onClick={() => setSelectedSymbol(sym)}
+              className={`px-4 py-2 text-sm rounded font-mono transition-all ${
+                selectedSymbol === sym
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-card border border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {sym}
+            </button>
+          ))}
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-primary font-mono bg-primary/10 px-3 py-1.5 rounded">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
           <div className="w-1.5 h-1.5 rounded-full bg-primary pulse-dot" />
-          live update
+          live · обновление 1с
         </div>
       </div>
 
-      {/* Asset selector */}
-      <div className="flex gap-2">
-        {COMPARISON_DATA.map(asset => (
-          <button
-            key={asset.symbol}
-            onClick={() => setSelectedAsset(asset)}
-            className={`px-4 py-2 rounded text-sm font-mono transition-colors ${
-              selectedAsset.symbol === asset.symbol
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-card border border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {asset.symbol}
-          </button>
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Мин. цена', value: `$${formatPrice(stats.min)}`, color: 'text-green', icon: 'ArrowDown' },
+          { label: 'Макс. цена', value: `$${formatPrice(stats.max)}`, color: 'text-red', icon: 'ArrowUp' },
+          { label: 'Среднее', value: `$${formatPrice(stats.avg)}`, color: 'text-foreground', icon: 'Minus' },
+          { label: 'Спред', value: `$${formatPrice(stats.totalSpread)} · ${stats.totalSpreadPct?.toFixed(3) ?? '0.000'}%`, color: 'text-yellow', icon: 'ArrowLeftRight' },
+        ].map((s) => (
+          <div key={s.label} className="bg-card border border-border rounded p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-muted-foreground">{s.label}</span>
+              <Icon name={s.icon} size={13} className={s.color} />
+            </div>
+            <div className={`text-sm font-mono font-medium ${s.color}`}>{s.value}</div>
+          </div>
         ))}
       </div>
 
-      {/* Opportunity cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-card border border-primary/30 rounded p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Icon name="ShoppingCart" size={14} className="text-primary" />
-            <span className="text-xs text-muted-foreground uppercase tracking-wider">Лучшая покупка</span>
+      <div className="grid grid-cols-3 gap-4">
+        {/* Comparison table */}
+        <div className="col-span-2 bg-card border border-border rounded overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Сравнение цен · {selectedSymbol}</span>
           </div>
-          <p className="text-xl font-mono font-medium text-primary">${formatPrice(bestBuy[1])}</p>
-          <p className="text-xs text-muted-foreground mt-1 capitalize">{bestBuy[0]}</p>
-        </div>
-        <div className="bg-card border border-green/20 rounded p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Icon name="DollarSign" size={14} className="text-green" />
-            <span className="text-xs text-muted-foreground uppercase tracking-wider">Лучшая продажа</span>
-          </div>
-          <p className="text-xl font-mono font-medium text-green">${formatPrice(bestSell[1])}</p>
-          <p className="text-xs text-muted-foreground mt-1 capitalize">{bestSell[0]}</p>
-        </div>
-        <div className="bg-card border border-border rounded p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Icon name="ArrowLeftRight" size={14} className="text-yellow" />
-            <span className="text-xs text-muted-foreground uppercase tracking-wider">Спред</span>
-          </div>
-          <p className="text-xl font-mono font-medium text-yellow">{spread}%</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            ${formatPrice(maxPrice - minPrice)} разница
-          </p>
-        </div>
-      </div>
-
-      {/* Price comparison table */}
-      <div className="bg-card border border-border rounded">
-        <div className="px-5 py-3 border-b border-border">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            {selectedAsset.symbol} — Цены по биржам
-          </span>
-        </div>
-        <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-border">
-                <th className="text-left px-5 py-3 text-muted-foreground font-medium">Биржа</th>
-                <th className="text-right px-5 py-3 text-muted-foreground font-medium">Цена</th>
-                <th className="text-right px-5 py-3 text-muted-foreground font-medium">Отклонение</th>
-                <th className="text-right px-5 py-3 text-muted-foreground font-medium">Статус</th>
-                <th className="px-5 py-3"></th>
+              <tr className="border-b border-border bg-secondary/30">
+                <th className="text-left px-5 py-2.5 text-muted-foreground font-medium">Биржа</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Цена</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Спред</th>
+                <th className="text-right px-5 py-2.5 text-muted-foreground font-medium">Спред %</th>
               </tr>
             </thead>
             <tbody>
-              {Object.entries(selectedAsset.prices)
-                .sort(([, a], [, b]) => a - b)
-                .map(([exId, price]) => {
-                  const ex = EXCHANGES.find(e => e.id === exId);
-                  const diff = ((price - minPrice) / minPrice * 100).toFixed(4);
-                  const isBest = price === minPrice;
-                  const isWorst = price === maxPrice;
-                  const barW = ((price - minPrice) / (maxPrice - minPrice + 0.001)) * 100;
-
-                  return (
-                    <tr key={exId} className={`border-b border-border last:border-0 transition-colors ${isBest ? 'bg-primary/3' : 'hover:bg-secondary/50'}`}>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          {isBest && <Icon name="Star" size={12} className="text-primary" />}
-                          {isWorst && <Icon name="ArrowUp" size={12} className="text-red" />}
-                          <span className="font-medium capitalize">{ex?.name || exId}</span>
-                        </div>
-                      </td>
-                      <td className={`px-5 py-4 text-right font-mono font-medium ${isBest ? 'text-primary' : ''}`}>
-                        ${formatPrice(price)}
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          <div className="w-24 h-1 bg-secondary rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${isBest ? 'bg-primary' : 'bg-muted-foreground'}`}
-                              style={{ width: `${barW}%` }}
-                            />
-                          </div>
-                          <span className={`font-mono w-16 text-right ${isBest ? 'text-primary' : 'text-muted-foreground'}`}>
-                            +{diff}%
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <span className={`font-mono text-xs ${
-                          ex?.status === 'online' ? 'text-primary' :
-                          ex?.status === 'warning' ? 'text-yellow' : 'text-red'
-                        }`}>
-                          {ex?.status === 'online' ? `${ex.latency}ms` : ex?.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <button className={`px-3 py-1 rounded text-xs transition-colors ${
-                          isBest
-                            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                            : 'bg-secondary text-muted-foreground hover:text-foreground'
-                        }`}>
-                          {isBest ? 'Купить' : 'Открыть'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+              {rows.map(row => (
+                <tr
+                  key={row.ex}
+                  className={`border-b border-border last:border-0 transition-colors ${
+                    row.isMin ? 'border-l-2 border-l-primary bg-primary/5' :
+                    row.isMax ? 'border-l-2 border-l-destructive bg-destructive/5' :
+                    'border-l-2 border-l-transparent hover:bg-secondary/30'
+                  }`}
+                >
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-1.5 h-1.5 rounded-full ${
+                        EXCHANGE_STATUS[row.ex] === 'online' ? 'bg-primary' :
+                        EXCHANGE_STATUS[row.ex] === 'warning' ? 'bg-yellow' : 'bg-red'
+                      }`} />
+                      <span className="font-medium">{EXCHANGE_NAMES[row.ex]}</span>
+                      {row.isMin && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-mono">мин</span>}
+                      {row.isMax && <span className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/15 text-destructive font-mono">макс</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-medium">${formatPrice(row.price)}</td>
+                  <td className={`px-4 py-3 text-right font-mono ${row.isMin ? 'text-muted-foreground' : 'text-yellow'}`}>
+                    {row.isMin ? '—' : `+$${formatPrice(row.spread)}`}
+                  </td>
+                  <td className={`px-5 py-3 text-right font-mono ${row.isMin ? 'text-muted-foreground' : 'text-yellow'}`}>
+                    {row.isMin ? '—' : `+${row.spreadPct.toFixed(4)}%`}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Visual price bar */}
-      <div className="bg-card border border-border rounded p-5">
-        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Визуальное сравнение цен</p>
-        <div className="space-y-3">
-          {Object.entries(selectedAsset.prices)
-            .sort(([, a], [, b]) => a - b)
-            .map(([exId, price]) => {
-              const ex = EXCHANGES.find(e => e.id === exId);
-              const pct = ((price - minPrice) / (maxPrice - minPrice + 0.001)) * 100;
-              const isBest = price === minPrice;
-              return (
-                <div key={exId} className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground w-20 capitalize">{ex?.name || exId}</span>
-                  <div className="flex-1 h-6 bg-secondary rounded overflow-hidden relative">
-                    <div
-                      className={`h-full rounded flex items-center px-2 transition-all ${isBest ? 'bg-primary' : 'bg-muted-foreground/30'}`}
-                      style={{ width: `${Math.max(pct, 8) + 8}%` }}
-                    >
-                      <span className={`text-xs font-mono whitespace-nowrap ${isBest ? 'text-primary-foreground' : 'text-foreground'}`}>
-                        ${formatPrice(price)}
-                      </span>
-                    </div>
+        {/* Arbitrage card */}
+        <div className="flex flex-col gap-3">
+          <div className="bg-card border border-border rounded p-5 flex-1">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4">Арбитраж</div>
+            {bestBuy && bestSell && bestBuy.ex !== bestSell.ex ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center">
+                    <Icon name="ArrowDown" size={14} className="text-green" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Купить на</div>
+                    <div className="text-sm font-medium">{EXCHANGE_NAMES[bestBuy.ex]}</div>
+                    <div className="text-xs font-mono text-green">${formatPrice(bestBuy.price)}</div>
                   </div>
                 </div>
-              );
-            })}
+                <div className="flex items-center gap-2 px-3">
+                  <div className="flex-1 h-px bg-border" />
+                  <Icon name="ArrowDown" size={12} className="text-muted-foreground" />
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded bg-destructive/10 flex items-center justify-center">
+                    <Icon name="ArrowUp" size={14} className="text-red" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Продать на</div>
+                    <div className="text-sm font-medium">{EXCHANGE_NAMES[bestSell.ex]}</div>
+                    <div className="text-xs font-mono text-red">${formatPrice(bestSell.price)}</div>
+                  </div>
+                </div>
+                <div className="border-t border-border pt-4 space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Спред</span>
+                    <span className="font-mono text-yellow">${formatPrice(bestSell.price - bestBuy.price)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Спред %</span>
+                    <span className="font-mono text-yellow">{((bestSell.price - bestBuy.price) / bestBuy.price * 100).toFixed(4)}%</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Прибыль $10k</span>
+                    <span className="font-mono text-primary">${arbitrageProfit.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">Нет данных для арбитража</div>
+            )}
+          </div>
         </div>
       </div>
     </div>

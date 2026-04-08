@@ -1,201 +1,189 @@
-import { useState, useEffect, useRef } from 'react';
-import { ASSETS, generatePriceHistory, formatPrice } from '@/data/mockData';
+import { useState, useMemo } from 'react';
+import { LineChart, Line, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { ASSETS, generatePriceHistory, formatPrice, formatVolume } from '@/data/mockData';
 import Icon from '@/components/ui/icon';
 
-const PERIODS = ['1ч', '4ч', '24ч', '7д', '30д'];
+const TOP_ASSETS = ['BTC', 'ETH', 'SOL'];
+const ASSET_COLORS: Record<string, string> = {
+  BTC: 'hsl(43,96%,56%)',
+  ETH: 'hsl(210,80%,60%)',
+  SOL: 'hsl(162,72%,50%)',
+};
 
 export default function Analytics() {
-  const [asset, setAsset] = useState('BTC/USDT');
-  const [period, setPeriod] = useState('24ч');
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [selectedAssets, setSelectedAssets] = useState<string[]>(['BTC', 'ETH', 'SOL']);
+  const [period, setPeriod] = useState<7 | 14 | 30>(30);
 
-  const selected = ASSETS.find(a => a.symbol === asset) || ASSETS[0];
-  const history = generatePriceHistory(selected.price, period === '7д' ? 168 : period === '30д' ? 720 : period === '4ч' ? 16 : 48);
-
-  useEffect(() => {
-    drawChart();
-  }, [asset, period]);
-
-  function drawChart() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const W = canvas.offsetWidth;
-    const H = canvas.offsetHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, W, H);
-
-    const prices = history.map(d => d.price);
-    const volumes = history.map(d => d.volume);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const range = max - min || 1;
-    const maxVol = Math.max(...volumes);
-
-    const pad = { top: 16, right: 16, bottom: 56, left: 72 };
-    const volH = 40;
-    const cw = W - pad.left - pad.right;
-    const ch = H - pad.top - pad.bottom - volH - 8;
-
-    const toX = (i: number) => pad.left + (i / (prices.length - 1)) * cw;
-    const toY = (v: number) => pad.top + ch - ((v - min) / range) * ch;
-
-    const isUp = prices[prices.length - 1] >= prices[0];
-    const lineColor = isUp ? '#34d399' : '#f87171';
-
-    // Grid lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 5; i++) {
-      const y = pad.top + (ch / 5) * i;
-      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
-      const val = max - (range / 5) * i;
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.font = '10px IBM Plex Mono';
-      ctx.textAlign = 'right';
-      ctx.fillText(formatPrice(val), pad.left - 8, y + 3.5);
+  const historyData = useMemo(() => {
+    const pts: Record<string, number | string>[] = [];
+    const now = new Date();
+    for (let i = period - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const point: Record<string, number | string> = {
+        date: d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }),
+      };
+      TOP_ASSETS.forEach(sym => {
+        const asset = ASSETS.find(a => a.symbol === sym + '/USDT');
+        if (asset) {
+          point[sym] = +(asset.price * (1 + (Math.random() - 0.5) * 0.12 * (i / period))).toFixed(2);
+        }
+      });
+      pts.push(point);
     }
+    return pts;
+  }, [period]);
 
-    // Volume bars
-    const volY = pad.top + ch + 8;
-    prices.forEach((_, i) => {
-      const x = toX(i);
-      const barH = (volumes[i] / maxVol) * volH;
-      ctx.fillStyle = i % 2 === 0 ? lineColor + '50' : lineColor + '30';
-      ctx.fillRect(x - 1.5, volY + volH - barH, 3, barH);
-    });
+  const volumeData = useMemo(() =>
+    Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (13 - i));
+      return {
+        date: d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }),
+        vol: +(40 + Math.random() * 30).toFixed(1),
+      };
+    }), []);
 
-    // Fill
-    ctx.beginPath();
-    ctx.moveTo(toX(0), toY(prices[0]));
-    for (let i = 1; i < prices.length; i++) {
-      const cpx = (toX(i - 1) + toX(i)) / 2;
-      ctx.bezierCurveTo(cpx, toY(prices[i-1]), cpx, toY(prices[i]), toX(i), toY(prices[i]));
-    }
-    ctx.lineTo(toX(prices.length - 1), pad.top + ch);
-    ctx.lineTo(toX(0), pad.top + ch);
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
-    grad.addColorStop(0, lineColor + '28');
-    grad.addColorStop(1, lineColor + '00');
-    ctx.fillStyle = grad;
-    ctx.fill();
+  const statCards = TOP_ASSETS.map(sym => {
+    const asset = ASSETS.find(a => a.symbol === sym + '/USDT');
+    const h = generatePriceHistory(asset?.price || 100, 30).map(d => d.price);
+    return {
+      symbol: sym,
+      price: asset?.price || 0,
+      change30d: asset ? ((asset.price - h[0]) / h[0]) * 100 : 0,
+      max: Math.max(...h),
+      min: Math.min(...h),
+    };
+  });
 
-    // Line
-    ctx.beginPath();
-    ctx.moveTo(toX(0), toY(prices[0]));
-    for (let i = 1; i < prices.length; i++) {
-      const cpx = (toX(i - 1) + toX(i)) / 2;
-      ctx.bezierCurveTo(cpx, toY(prices[i-1]), cpx, toY(prices[i]), toX(i), toY(prices[i]));
-    }
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Time labels
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    ctx.font = '10px IBM Plex Mono';
-    ctx.textAlign = 'center';
-    const step = Math.floor(prices.length / 8);
-    for (let i = 0; i < prices.length; i += step) {
-      ctx.fillText(history[i].time, toX(i), H - pad.bottom + 16);
-    }
-
-    // Dot at end
-    ctx.beginPath();
-    ctx.arc(toX(prices.length - 1), toY(prices[prices.length - 1]), 4, 0, Math.PI * 2);
-    ctx.fillStyle = lineColor;
-    ctx.fill();
-  }
-
-  const priceMin = Math.min(...history.map(d => d.price));
-  const priceMax = Math.max(...history.map(d => d.price));
-  const priceStart = history[0]?.price ?? 0;
-  const priceEnd = history[history.length - 1]?.price ?? 0;
-  const totalChange = ((priceEnd - priceStart) / priceStart * 100).toFixed(2);
-  const isUp = parseFloat(totalChange) >= 0;
+  const toggleAsset = (sym: string) =>
+    setSelectedAssets(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
 
   return (
     <div className="p-6 space-y-5 animate-fade-in">
-      {/* Controls */}
-      <div className="flex items-center gap-3">
-        <div className="flex gap-1 bg-card border border-border rounded p-1">
-          {ASSETS.map(a => (
-            <button
-              key={a.symbol}
-              onClick={() => setAsset(a.symbol)}
-              className={`px-3 py-1.5 rounded text-xs font-mono transition-colors ${
-                asset === a.symbol ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {a.symbol.split('/')[0]}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-1 bg-card border border-border rounded p-1 ml-auto">
-          {PERIODS.map(p => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded text-xs font-mono transition-colors ${
-                period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Текущая цена', value: `$${formatPrice(priceEnd)}`, color: isUp ? 'text-green' : 'text-red' },
-          { label: 'Изменение', value: `${isUp ? '+' : ''}${totalChange}%`, color: isUp ? 'text-green' : 'text-red' },
-          { label: 'Минимум', value: `$${formatPrice(priceMin)}`, color: 'text-foreground' },
-          { label: 'Максимум', value: `$${formatPrice(priceMax)}`, color: 'text-foreground' },
-        ].map((m, i) => (
-          <div key={i} className="bg-card border border-border rounded p-4">
-            <p className="text-xs text-muted-foreground mb-1">{m.label}</p>
-            <p className={`text-lg font-mono font-medium ${m.color}`}>{m.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Main chart */}
-      <div className="bg-card border border-border rounded" style={{ height: '380px' }}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <span className="text-sm font-medium">{asset} · {period}</span>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Icon name="Info" size={12} />
-            <span>Включая объёмы торгов</span>
-          </div>
-        </div>
-        <div className="p-3" style={{ height: 'calc(100% - 49px)' }}>
-          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
-        </div>
-      </div>
-
-      {/* Trend analysis */}
       <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Тренд', value: isUp ? 'Восходящий' : 'Нисходящий', icon: isUp ? 'TrendingUp' : 'TrendingDown', color: isUp ? 'text-green' : 'text-red' },
-          { label: 'Волатильность', value: Math.abs(parseFloat(totalChange)) > 3 ? 'Высокая' : 'Средняя', icon: 'Activity', color: 'text-yellow' },
-          { label: 'Сигнал', value: isUp ? 'Покупка' : 'Наблюдение', icon: isUp ? 'ArrowUpCircle' : 'Eye', color: isUp ? 'text-green' : 'text-muted-foreground' },
-        ].map((t, i) => (
-          <div key={i} className="bg-card border border-border rounded p-4 flex items-center gap-4">
-            <Icon name={t.icon} size={20} className={t.color} />
-            <div>
-              <p className="text-xs text-muted-foreground">{t.label}</p>
-              <p className={`text-sm font-medium ${t.color}`}>{t.value}</p>
+        {statCards.map(card => (
+          <div key={card.symbol} className="bg-card border border-border rounded p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-muted-foreground uppercase">{card.symbol}/USDT</span>
+              <Icon name={card.change30d >= 0 ? 'TrendingUp' : 'TrendingDown'} size={14} className={card.change30d >= 0 ? 'text-green' : 'text-red'} />
+            </div>
+            <p className="text-xl font-mono font-medium mb-2">${formatPrice(card.price)}</p>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <p className="text-muted-foreground">30д</p>
+                <p className={`font-mono font-medium ${card.change30d >= 0 ? 'text-green' : 'text-red'}`}>
+                  {card.change30d >= 0 ? '+' : ''}{card.change30d.toFixed(1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Макс</p>
+                <p className="font-mono text-green">${formatPrice(card.max)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Мин</p>
+                <p className="font-mono text-red">${formatPrice(card.min)}</p>
+              </div>
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="bg-card border border-border rounded p-5">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">История цен</span>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1.5">
+              {TOP_ASSETS.map(sym => (
+                <button
+                  key={sym}
+                  onClick={() => toggleAsset(sym)}
+                  className={`px-2.5 py-1 text-xs rounded font-mono transition-all border ${
+                    selectedAssets.includes(sym) ? 'border-transparent' : 'border-border opacity-40'
+                  }`}
+                  style={selectedAssets.includes(sym) ? {
+                    background: ASSET_COLORS[sym] + '20',
+                    color: ASSET_COLORS[sym],
+                    borderColor: ASSET_COLORS[sym] + '40',
+                  } : {}}
+                >
+                  {sym}
+                </button>
+              ))}
+            </div>
+            <div className="flex border border-border rounded overflow-hidden">
+              {([7, 14, 30] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-2.5 py-1 text-xs font-mono transition-colors ${
+                    period === p ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {p}д
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={historyData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+            <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10, fontFamily: 'IBM Plex Mono' }} tickLine={false} axisLine={false} />
+            <YAxis hide />
+            <Tooltip
+              contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 2, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+              labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+            />
+            {selectedAssets.includes('BTC') && <Line type="monotone" dataKey="BTC" stroke={ASSET_COLORS.BTC} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />}
+            {selectedAssets.includes('ETH') && <Line type="monotone" dataKey="ETH" stroke={ASSET_COLORS.ETH} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />}
+            {selectedAssets.includes('SOL') && <Line type="monotone" dataKey="SOL" stroke={ASSET_COLORS.SOL} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-4">Объём ($B) · 14 дней</span>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={volumeData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10, fontFamily: 'IBM Plex Mono' }} tickLine={false} axisLine={false} interval={2} />
+              <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10, fontFamily: 'IBM Plex Mono' }} tickLine={false} axisLine={false} tickFormatter={v => `$${v}B`} width={42} />
+              <Tooltip
+                formatter={(v: number) => [`$${v.toFixed(1)}B`, 'Объём']}
+                contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 2, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+              />
+              <Bar dataKey="vol" fill="hsl(var(--primary))" fillOpacity={0.6} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-card border border-border rounded p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-3">Все активы</span>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left py-2 text-muted-foreground font-medium">Пара</th>
+                <th className="text-right py-2 text-muted-foreground font-medium">Цена</th>
+                <th className="text-right py-2 text-muted-foreground font-medium">24ч</th>
+                <th className="text-right py-2 text-muted-foreground font-medium">Объём</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ASSETS.map(a => (
+                <tr key={a.symbol} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
+                  <td className="py-2.5 font-medium">{a.symbol}</td>
+                  <td className="py-2.5 text-right font-mono">${formatPrice(a.price)}</td>
+                  <td className={`py-2.5 text-right font-mono ${a.change24h >= 0 ? 'text-green' : 'text-red'}`}>
+                    {a.change24h >= 0 ? '+' : ''}{a.change24h.toFixed(2)}%
+                  </td>
+                  <td className="py-2.5 text-right font-mono text-muted-foreground">{formatVolume(a.volume)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
