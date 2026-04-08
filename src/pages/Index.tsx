@@ -1,14 +1,23 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import Layout from '@/components/Layout';
+import Dashboard from '@/pages/Dashboard';
+import Exchanges from '@/pages/Exchanges';
+import Analytics from '@/pages/Analytics';
+import Compare from '@/pages/Compare';
+import Settings from '@/pages/Settings';
 
-const Index = () => {
+export default function Index() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4 color-black text-black">Добро пожаловать!</h1>
-        <p className="text-xl text-gray-600">тут будет отображаться ваш проект</p>
-      </div>
-    </div>
+    <Layout>
+      {(page, setPage) => {
+        switch (page) {
+          case 'dashboard': return <Dashboard />;
+          case 'exchanges': return <Exchanges />;
+          case 'analytics': return <Analytics />;
+          case 'compare': return <Compare />;
+          case 'settings': return <Settings />;
+          default: return <Dashboard />;
+        }
+      }}
+    </Layout>
   );
-};
-
-export default Index;
+}
